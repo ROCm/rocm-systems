@@ -38,7 +38,7 @@ class DmaBlitManager : public device::HostBlitManager {
   virtual ~DmaBlitManager() {}
 
   //! Creates DmaBlitManager object
-  virtual bool create(amd::Device& device) { return true; }
+  virtual bool create(amd::Device& device) override { return true; }
 
   //! Copies a buffer object to system memory
   virtual bool readBuffer(
@@ -48,7 +48,7 @@ class DmaBlitManager : public device::HostBlitManager {
       const amd::Coord3D& size,                             //!< Size of the copy region
       bool entire = false,                                  //!< Entire buffer will be updated
       amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
-  ) const;
+  ) const override;
 
   //! Copies a buffer object to system memory
   virtual bool readBufferRect(
@@ -59,7 +59,7 @@ class DmaBlitManager : public device::HostBlitManager {
       const amd::Coord3D& size,                             //!< Size of the copy region
       bool entire = false,                                  //!< Entire buffer will be updated
       amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
-  ) const;
+  ) const override;
 
   //! Copies an image object to system memory
   virtual bool readImage(
@@ -71,7 +71,7 @@ class DmaBlitManager : public device::HostBlitManager {
       size_t slicePitch,                                    //!< Slice pitch for host memory
       bool entire = false,                                  //!< Entire buffer will be updated
       amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
-  ) const;
+  ) const override;
 
   //! Copies system memory to a buffer object
   virtual bool writeBuffer(
@@ -81,7 +81,7 @@ class DmaBlitManager : public device::HostBlitManager {
       const amd::Coord3D& size,                             //!< Size of the copy region
       bool entire = false,                                  //!< Entire buffer will be updated
       amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
-  ) const;
+  ) const override;
 
   //! Copies system memory to a buffer object
   virtual bool writeBufferRect(
@@ -92,7 +92,7 @@ class DmaBlitManager : public device::HostBlitManager {
       const amd::Coord3D& size,                             //!< Size of the copy region
       bool entire = false,                                  //!< Entire buffer will be updated
       amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
-  ) const;
+  ) const override;
 
   //! Copies system memory to an image object
   virtual bool writeImage(
@@ -104,7 +104,7 @@ class DmaBlitManager : public device::HostBlitManager {
       size_t slicePitch,                                    //!< Slice pitch for host memory
       bool entire = false,                                  //!< Entire buffer will be updated
       amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
-  ) const;
+  ) const override;
 
   //! Copies a buffer object to another buffer object
   virtual bool copyBuffer(
@@ -115,7 +115,7 @@ class DmaBlitManager : public device::HostBlitManager {
       const amd::Coord3D& size,                             //!< Size of the copy region
       bool entire = false,                                  //!< Entire buffer will be updated
       amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
-  ) const;
+  ) const override;
 
   //! Copies a buffer object to another buffer object
   virtual bool copyBufferRect(
@@ -126,12 +126,12 @@ class DmaBlitManager : public device::HostBlitManager {
       const amd::Coord3D& size,                             //!< Size of the copy region
       bool entire = false,                                  //!< Entire buffer will be updated
       amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
-  ) const;
+  ) const override;
 
   //! Copies multiple buffer objects in a batch
   virtual bool copyBufferBatch(
       const std::vector<amd::BatchCopyOp>& copyOps  //!< Batch of copy operations
-  ) const;
+  ) const override;
 
   //! Copies multiple pitched boxes between buffer objects in a batch through SDMA
   bool CopyBufferRectBatch(
@@ -149,7 +149,7 @@ class DmaBlitManager : public device::HostBlitManager {
       size_t rowPitch = 0,                                  //!< Pitch for buffer
       size_t slicePitch = 0,                                //!< Slice for buffer
       amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
-  ) const;
+  ) const override;
 
   //! Copies a buffer object to an image object
   virtual bool copyBufferToImage(
@@ -162,7 +162,7 @@ class DmaBlitManager : public device::HostBlitManager {
       size_t rowPitch = 0,                                  //!< Pitch for buffer
       size_t slicePitch = 0,                                //!< Slice for buffer
       amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
-  ) const;
+  ) const override;
 
   //! Copies an image object to another image object
   virtual bool copyImage(
@@ -173,25 +173,25 @@ class DmaBlitManager : public device::HostBlitManager {
       const amd::Coord3D& size,                             //!< Size of the copy region
       bool entire = false,                                  //!< Entire buffer will be updated
       amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
-  ) const;
+  ) const override;
 
   //! Stream memory write operation - Write a 'value' at 'memory'.
   virtual bool streamOpsWrite(device::Memory& memory,  //!< Memory to write the 'value'
-                              uint64_t value, size_t offset, size_t sizeBytes) const {
+                              uint64_t value, size_t offset, size_t sizeBytes) const override {
     assert(!"Unimplemented");
     return false;
   }
 
   //! Stream memory increment operation - Increment memory by a 'value'.
   virtual bool streamOpsIncrement(device::Memory& memory, uint64_t value, size_t offset,
-                                  size_t sizeBytes) const {
+                                  size_t sizeBytes) const override {
     assert(!"Unimplemented");
     return false;
   }
 
   //! Stream memory decrement operation - Decrement memory by a 'value'.
   virtual bool streamOpsDecrement(device::Memory& memory, uint64_t value, size_t offset,
-                                  size_t sizeBytes) const {
+                                  size_t sizeBytes) const override {
     assert(!"Unimplemented");
     return false;
   }
@@ -199,13 +199,13 @@ class DmaBlitManager : public device::HostBlitManager {
   //! Stream memory ops- Waits for a 'value' at 'memory' and wait is released based on compare op.
   virtual bool streamOpsWait(device::Memory& memory,  //!< Memory to compare the 'value' against
                              uint64_t value, size_t offset, size_t sizeBytes, uint64_t flags,
-                             uint64_t mask) const {
+                             uint64_t mask) const override {
     assert(!"Unimplemented");
     return false;
   }
 
   virtual bool initHeap(device::Memory* heap_to_initialize, device::Memory* initial_blocks,
-                        uint heap_size, uint number_of_initial_blocks) const {
+                        uint heap_size, uint number_of_initial_blocks) const override {
     assert(!"Unimplemented");
     return false;
   }
@@ -251,10 +251,9 @@ class DmaBlitManager : public device::HostBlitManager {
                                std::vector<ProfilingSignal*>* outBatchSignals = nullptr) const;
 
   //! Batch version of rocrCopyBuffer
-  bool rocrCopyBufferBatch(
-      const std::vector<hsa_amd_memory_copy_op_t>& copyOps,
-      const std::vector<hsa_signal_t>* externalWaitEvents = nullptr,
-      std::vector<ProfilingSignal*>* outBatchSignals = nullptr) const;
+  bool rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_op_t>& copyOps,
+                           const std::vector<hsa_signal_t>* externalWaitEvents = nullptr,
+                           std::vector<ProfilingSignal*>* outBatchSignals = nullptr) const;
 
   // Get Pinned Host Memory or Staging Buffer
   void getBuffer(const_address hostMem,  //!< Host Mem Address
@@ -280,8 +279,8 @@ class DmaBlitManager : public device::HostBlitManager {
   const size_t MinSizeForPinnedXfer;  //!< Mininum copy size for Pinned Copy
   const size_t StagingXferSize;       //!< Copy size for Staging Buffer Copy
 
-  bool completeOperation_;        //!< DMA blit manager must complete operation
-  amd::Context* context_;         //!< A dummy context
+  bool completeOperation_;  //!< DMA blit manager must complete operation
+  amd::Context* context_;   //!< A dummy context
 
  private:
   //! Disable copy constructor
@@ -350,13 +349,12 @@ class KernelBlitManager : public DmaBlitManager {
   ) const override;
 
   //! Copies a buffer object to system memory
-  bool readBuffer(
-      device::Memory& srcMemory,                            //!< Source memory object
-      void* dstHost,                                        //!< Destination host memory
-      const amd::Coord3D& origin,                           //!< Source origin
-      const amd::Coord3D& size,                             //!< Size of the copy region
-      bool entire = false,                                  //!< Entire buffer will be updated
-      amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
+  bool readBuffer(device::Memory& srcMemory,   //!< Source memory object
+                  void* dstHost,               //!< Destination host memory
+                  const amd::Coord3D& origin,  //!< Source origin
+                  const amd::Coord3D& size,    //!< Size of the copy region
+                  bool entire = false,         //!< Entire buffer will be updated
+                  amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
   ) const override;
 
   //! Copies a buffer object to system memory
@@ -371,13 +369,12 @@ class KernelBlitManager : public DmaBlitManager {
   ) const override;
 
   //! Copies system memory to a buffer object
-  bool writeBuffer(
-      const void* srcHost,                                  //!< Source host memory
-      device::Memory& dstMemory,                            //!< Destination memory object
-      const amd::Coord3D& origin,                           //!< Destination origin
-      const amd::Coord3D& size,                             //!< Size of the copy region
-      bool entire = false,                                  //!< Entire buffer will be updated
-      amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
+  bool writeBuffer(const void* srcHost,         //!< Source host memory
+                   device::Memory& dstMemory,   //!< Destination memory object
+                   const amd::Coord3D& origin,  //!< Destination origin
+                   const amd::Coord3D& size,    //!< Size of the copy region
+                   bool entire = false,         //!< Entire buffer will be updated
+                   amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
   ) const override;
 
   //! Copies system memory to a buffer object
@@ -392,8 +389,7 @@ class KernelBlitManager : public DmaBlitManager {
   ) const override;
 
   //! Copies multiple buffer objects in a batch
-  bool copyBufferBatch(
-      const std::vector<amd::BatchCopyOp>& copyOps  //!< Batch of copy operations
+  bool copyBufferBatch(const std::vector<amd::BatchCopyOp>& copyOps  //!< Batch of copy operations
   ) const override;
 
   //! Copies pageable host-to-device operations in a batch
@@ -407,14 +403,13 @@ class KernelBlitManager : public DmaBlitManager {
   ) const override;
 
   //! Copies a buffer object to an image object
-  bool copyBuffer(
-      device::Memory& srcMemory,                            //!< Source memory object
-      device::Memory& dstMemory,                            //!< Destination memory object
-      const amd::Coord3D& srcOrigin,                        //!< Source origin
-      const amd::Coord3D& dstOrigin,                        //!< Destination origin
-      const amd::Coord3D& size,                             //!< Size of the copy region
-      bool entire = false,                                  //!< Entire buffer will be updated
-      amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
+  bool copyBuffer(device::Memory& srcMemory,      //!< Source memory object
+                  device::Memory& dstMemory,      //!< Destination memory object
+                  const amd::Coord3D& srcOrigin,  //!< Source origin
+                  const amd::Coord3D& dstOrigin,  //!< Destination origin
+                  const amd::Coord3D& size,       //!< Size of the copy region
+                  bool entire = false,            //!< Entire buffer will be updated
+                  amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
   ) const override;
 
   //! Copies a buffer object to an image object
@@ -444,49 +439,46 @@ class KernelBlitManager : public DmaBlitManager {
   ) const override;
 
   //! Copies an image object to another image object
-  bool copyImage(
-      device::Memory& srcMemory,                            //!< Source memory object
-      device::Memory& dstMemory,                            //!< Destination memory object
-      const amd::Coord3D& srcOrigin,                        //!< Source origin
-      const amd::Coord3D& dstOrigin,                        //!< Destination origin
-      const amd::Coord3D& size,                             //!< Size of the copy region
-      bool entire = false,                                  //!< Entire buffer will be updated
-      amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
+  bool copyImage(device::Memory& srcMemory,      //!< Source memory object
+                 device::Memory& dstMemory,      //!< Destination memory object
+                 const amd::Coord3D& srcOrigin,  //!< Source origin
+                 const amd::Coord3D& dstOrigin,  //!< Destination origin
+                 const amd::Coord3D& size,       //!< Size of the copy region
+                 bool entire = false,            //!< Entire buffer will be updated
+                 amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
   ) const override;
 
   //! Copies an image object to system memory
-  bool readImage(
-      device::Memory& srcMemory,                            //!< Source memory object
-      void* dstHost,                                        //!< Destination host memory
-      const amd::Coord3D& origin,                           //!< Source origin
-      const amd::Coord3D& size,                             //!< Size of the copy region
-      size_t rowPitch,                                      //!< Row pitch for host memory
-      size_t slicePitch,                                    //!< Slice pitch for host memory
-      bool entire = false,                                  //!< Entire buffer will be updated
-      amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
+  bool readImage(device::Memory& srcMemory,   //!< Source memory object
+                 void* dstHost,               //!< Destination host memory
+                 const amd::Coord3D& origin,  //!< Source origin
+                 const amd::Coord3D& size,    //!< Size of the copy region
+                 size_t rowPitch,             //!< Row pitch for host memory
+                 size_t slicePitch,           //!< Slice pitch for host memory
+                 bool entire = false,         //!< Entire buffer will be updated
+                 amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
   ) const override;
 
   //! Copies system memory to an image object
-  bool writeImage(
-      const void* srcHost,                                  //!< Source host memory
-      device::Memory& dstMemory,                            //!< Destination memory object
-      const amd::Coord3D& origin,                           //!< Destination origin
-      const amd::Coord3D& size,                             //!< Size of the copy region
-      size_t rowPitch,                                      //!< Row pitch for host memory
-      size_t slicePitch,                                    //!< Slice pitch for host memory
-      bool entire = false,                                  //!< Entire buffer will be updated
-      amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
+  bool writeImage(const void* srcHost,         //!< Source host memory
+                  device::Memory& dstMemory,   //!< Destination memory object
+                  const amd::Coord3D& origin,  //!< Destination origin
+                  const amd::Coord3D& size,    //!< Size of the copy region
+                  size_t rowPitch,             //!< Row pitch for host memory
+                  size_t slicePitch,           //!< Slice pitch for host memory
+                  bool entire = false,         //!< Entire buffer will be updated
+                  amd::CopyMetadata copyMetadata = amd::CopyMetadata()  //!< Memory copy MetaData
   ) const override;
 
   //! Fills a buffer memory with a pattern data
-  bool fillBuffer(device::Memory& memory,               //!< Memory object to fill with pattern
-                          const void* pattern,          //!< Pattern data
-                          size_t patternSize,           //!< Pattern size
-                          const amd::Coord3D& surface,  //!< Whole Surface of mem object.
-                          const amd::Coord3D& origin,   //!< Destination origin
-                          const amd::Coord3D& size,     //!< Size of the fill region
-                          bool entire = false,          //!< Entire buffer will be updated
-                          bool forceBlit = false        //!< Force GPU Blit for fill
+  bool fillBuffer(device::Memory& memory,       //!< Memory object to fill with pattern
+                  const void* pattern,          //!< Pattern data
+                  size_t patternSize,           //!< Pattern size
+                  const amd::Coord3D& surface,  //!< Whole Surface of mem object.
+                  const amd::Coord3D& origin,   //!< Destination origin
+                  const amd::Coord3D& size,     //!< Size of the fill region
+                  bool entire = false,          //!< Entire buffer will be updated
+                  bool forceBlit = false        //!< Force GPU Blit for fill
   ) const override;
 
   //! Fills a buffer memory with a pattern data
@@ -534,11 +526,11 @@ class KernelBlitManager : public DmaBlitManager {
 
 
   //! Fills an image memory with a pattern data
-  bool fillImage(device::Memory& dstMemory,           //!< Memory object to fill with pattern
-                         const void* pattern,         //!< Pattern data
-                         const amd::Coord3D& origin,  //!< Destination origin
-                         const amd::Coord3D& size,    //!< Size of the copy region
-                         bool entire = false          //!< Entire buffer will be updated
+  bool fillImage(device::Memory& dstMemory,   //!< Memory object to fill with pattern
+                 const void* pattern,         //!< Pattern data
+                 const amd::Coord3D& origin,  //!< Destination origin
+                 const amd::Coord3D& size,    //!< Size of the copy region
+                 bool entire = false          //!< Entire buffer will be updated
   ) const override;
 
   bool runScheduler(uint64_t vqVM, hsa_queue_t* schedulerQueue, uint threads, uint64_t aql_wrap);
@@ -549,28 +541,28 @@ class KernelBlitManager : public DmaBlitManager {
 
   //! Stream memory write operation - Write a 'value' at 'memory'.
   bool streamOpsWrite(device::Memory& memory,  //!< Memory to write the 'value'
-                              uint64_t value, size_t offset, size_t sizeBytes) const override;
+                      uint64_t value, size_t offset, size_t sizeBytes) const override;
 
   //! Stream memory increment operation - Increment memory by a 'value'.
   bool streamOpsIncrement(device::Memory& memory, uint64_t value, size_t offset,
-                                  size_t sizeBytes) const override;
+                          size_t sizeBytes) const override;
 
   //! Stream memory decrement operation - Decrement memory by a 'value'.
   bool streamOpsDecrement(device::Memory& memory, uint64_t value, size_t offset,
-                                  size_t sizeBytes) const override;
+                          size_t sizeBytes) const override;
 
   //! Stream memory ops- Waits for a 'value' at 'memory' and wait is released based on compare op.
-  bool streamOpsWait(
-      device::Memory& memory,  //!< Memory contents to compare the 'value' against
-      uint64_t value, size_t offset, size_t sizeBytes, uint64_t flags, uint64_t mask) const override;
+  bool streamOpsWait(device::Memory& memory,  //!< Memory contents to compare the 'value' against
+                     uint64_t value, size_t offset, size_t sizeBytes, uint64_t flags,
+                     uint64_t mask) const override;
 
   //! Batch memory ops- Submits batch of streamWaits and streamWrite operations.
   bool batchMemOps(const void* paramArray, size_t paramSize, uint32_t count) const override;
 
   std::recursive_mutex* lockXfer() const override { return &lockXferOps_; }
 
-  bool initHeap(device::Memory* heap_to_initialize, device::Memory* initial_blocks,
-                        uint heap_size, uint number_of_initial_blocks) const override;
+  bool initHeap(device::Memory* heap_to_initialize, device::Memory* initial_blocks, uint heap_size,
+                uint number_of_initial_blocks) const override;
 
  private:
   static constexpr size_t MaxXferBuffers = 2;
@@ -674,9 +666,9 @@ class KernelBlitManager : public DmaBlitManager {
   //! Disable operator=
   KernelBlitManager& operator=(const KernelBlitManager&);
 
-  amd::Program* program_;             //!< GPU program object
-  amd::Kernel* kernels_[BlitTotal];   //!< GPU kernels for blit
-  size_t xferBufferSize_;             //!< Transfer buffer size
+  amd::Program* program_;                     //!< GPU program object
+  amd::Kernel* kernels_[BlitTotal];           //!< GPU kernels for blit
+  size_t xferBufferSize_;                     //!< Transfer buffer size
   mutable std::recursive_mutex lockXferOps_;  //!< Lock transfer operation
 };
 
