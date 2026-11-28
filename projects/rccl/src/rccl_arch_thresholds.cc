@@ -703,6 +703,18 @@ static const rcclArchThresholds rcclArchThresholds_gfx950 = {
   .forceCeScratch = true,
   .bcRingLLMaxBytes = 0,
   .bcRingLL128MaxBytes = 0,
+  // ddaIpcLLWide: 8-rank IPC LL one-shots on more blocks than the IPC kernel ({min, max total bytes, blocks}).
+  .ddaIpcLLWide = {
+    {},                             // [0] Broadcast      -- not used
+    {},                             // [1] Reduce          -- not used
+    {64ULL*1024, 128ULL*1024, 16},  // [2] AllGather       -- 8 x 2 blocks; IPC Simple on 1 block below it
+    {},                             // [3] ReduceScatter   -- not used
+    {},                             // [4] AllReduce       -- not used
+    {},                             // [5] SendRecv        -- not used
+    {},                             // [6] Send            -- not used
+    {},                             // [7] Recv            -- not used
+    {},                             // [8] AlltoAll        -- not used
+  },
 };
 
 // gfx942: DDA-IPC cap is 8 MiB for AR/AG/RS and 4 MiB for AlltoAll. No fabric LL/LL128.
@@ -856,6 +868,18 @@ static const rcclArchThresholds rcclArchThresholds_gfx942 = {
   .forceCeScratch = true,
   .bcRingLLMaxBytes = 0,
   .bcRingLL128MaxBytes = 0,
+  // ddaIpcLLWide: 8-rank IPC LL one-shots on more blocks than the IPC kernel ({min, max total bytes, blocks}).
+  .ddaIpcLLWide = {
+    {},                             // [0] Broadcast      -- not used
+    {},                             // [1] Reduce          -- not used
+    {64ULL*1024, 128ULL*1024, 16},  // [2] AllGather       -- 8 x 2 blocks; IPC Simple on 1 block below it
+    {},                             // [3] ReduceScatter   -- not used
+    {},                             // [4] AllReduce       -- not used
+    {},                             // [5] SendRecv        -- not used
+    {},                             // [6] Send            -- not used
+    {},                             // [7] Recv            -- not used
+    {},                             // [8] AlltoAll        -- not used
+  },
 };
 
 bool rcclWindowFits(size_t totalBytes, size_t minBytes, size_t maxBytes) {

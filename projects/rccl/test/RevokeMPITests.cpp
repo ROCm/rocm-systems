@@ -1093,6 +1093,12 @@ TEST_F(RevokeDdaIpcMPITest, IncompleteCollective_DdaIpcLLReduceScatter)
     runIncompleteDdaRevokeShrink(*this, {ncclFuncReduceScatter, 1024, kDdaLL, NCCL_PROTO_LL, {}});
 }
 
+// 64 KiB total opens the gfx950 and gfx942 AllGather IPC LL window; its LL one-shot polls peer flags until revoked.
+TEST_F(RevokeDdaIpcMPITest, IncompleteCollective_DdaIpcLLAllGather)
+{
+    runIncompleteDdaRevokeShrink(*this, {ncclFuncAllGather, 2048, kDdaLL, NCCL_PROTO_LL, {}});
+}
+
 TEST_F(RevokeDdaIpcMPITest, IncompleteCollective_DdaIpcAlltoAll)
 {
     runIncompleteDdaRevokeShrink(*this, {ncclFuncAlltoAll, 1024, kDdaIpc, NCCL_PROTO_SIMPLE, {}});

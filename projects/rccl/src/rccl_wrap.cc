@@ -120,7 +120,8 @@ RCCL_PARAM(DdaLL128, "DDA_LL128", kDdaThresholdUnset);
 RCCL_PARAM(DdaLL128Threshold, "DDA_LL128_THRESHOLD", kDdaThresholdUnset);
 // Broadcast DDA: unset follows the arch table (any Broadcast DDA tier), 0 off, >0 on.
 RCCL_PARAM(DdaBc, "DDA_BC", kDdaThresholdUnset);
-// Cap in total bytes of the IPC LL one-shot of AllReduce and ReduceScatter: unset follows the table, 0 off.
+// Cap in total bytes of the IPC LL one-shot of AllReduce and ReduceScatter, and top of the IPC LL wide windows
+// (ddaIpcLLWide): unset follows the table, 0 off.
 RCCL_PARAM(DdaIpcLLThreshold, "DDA_IPC_LL_THRESHOLD", kDdaThresholdUnset);
 // When set, bypass the per-arch tuning table entirely and use base-commit
 // env-var defaults for all thresholds (DDA, CE, symMaxR2).  Useful for
@@ -1508,6 +1509,31 @@ int rcclDdaFabricAgLL128Blocks(const ncclComm* comm, size_t totalBytes) {
   return std::min(cap, table->ddaAgLL128MaxBlocks);
 }
 
+// Top in total bytes of func's ddaIpcLLWide window: the table's, lowered by RCCL_DDA_IPC_LL_THRESHOLD or else
+// RCCL_DDA_LL_THRESHOLD. 0 when the table sets no window, RCCL_DDA_LL=0 or the env leaves the window empty.
+inline size_t ddaIpcLLWideTop(const rcclArchThresholds* table, ncclFunc_t func) {
+  if (table == nullptr || (unsigned)func >= RCCL_DDA_FUNC_COUNT || table->ddaIpcLLWide[func].blocks == 0 ||
+      !rcclParamDdaLL()) {
+    return 0;
+  }
+  size_t envCap = SIZE_MAX;
+  if (!ddaThresholdFromEnv(rcclParamDdaIpcLLThreshold(), &envCap)) {
+    ddaThresholdFromEnv(rcclParamDdaLLThreshold(), &envCap);
+  }
+  const size_t top = std::min(table->ddaIpcLLWide[func].maxBytes, envCap);
+  return top >= table->ddaIpcLLWide[func].minBytes ? top : 0;
+}
+
+// The table's ddaIpcLLWide blocks for func from its minBytes up to ddaIpcLLWideTop, else 0.
+uint32_t rcclDdaIpcLLWideBlocks(const ncclComm* comm, ncclFunc_t func, size_t totalBytes) {
+  const rcclArchThresholds* table = extAlgoArchTable(comm);
+  const size_t top = ddaIpcLLWideTop(table, func);
+  if (top == 0 || totalBytes < table->ddaIpcLLWide[func].minBytes || totalBytes > top) {
+    return 0;
+  }
+  return table->ddaIpcLLWide[func].blocks;
+}
+
 int rcclDdaFabricA2aLL128Threads(const ncclComm* comm, size_t totalBytes) {
   const rcclArchThresholds* table = extAlgoArchTable(comm);
   if (table == nullptr ||
@@ -1564,6 +1590,8 @@ inline size_t rcclDdaEntryThresholdTab(const rcclArchThresholds* table, ncclFunc
   cap = std::max(cap, rcclDdaLLThresholdTab(table, func, nRanks));
   cap = std::max(cap, rcclDdaLL128ThresholdTab(table, func, nRanks));
   if (table != nullptr)    cap = std::max(cap, funcThresholdFromTable(table->ddaVmmMaxGraph, func));
+  // The IPC LL wide window, up to its env-lowered top.
+  cap = std::max(cap, ddaIpcLLWideTop(table, func));
   return cap;
 }
 // rcclDdaEntryThresholdTab, widened to the comm's LL cap (RCCL_DDA_IPC_LL_THRESHOLD on the IPC path).
@@ -2512,6 +2540,13 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
           decision->nMaxChannels = ncclAllGatherDdaFabricBlocks(comm, sendcount, datatype);
           return rcclSelectDone("AG", query, decision);
         }
+      } else if (rcclDdaIpcLLWideBlocks(comm, ncclFuncAllGather, totalBytes) > 0 &&
+                 ncclAllGatherDdaFabricLLEligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
+        // Single-node IPC LL one-shot in its wide window (also checked by the eligibility, which owns the grid).
+        decision->algo = RCCL_DDA_FABRIC_LL;
+        decision->protocol = NCCL_PROTO_LL;
+        decision->nMaxChannels = ncclAllGatherDdaFabricLLBlocks(comm, sendcount, datatype);
+        return rcclSelectDone("AG", query, decision);
       } else if (agDdaVmmMax != 0 && totalBytes <= agDdaVmmMax &&
                  ncclAllGatherDdaIpcEligible(comm, sendbuff, recvbuff, sendcount, datatype)) {
         decision->algo = RCCL_DDA_IPC;

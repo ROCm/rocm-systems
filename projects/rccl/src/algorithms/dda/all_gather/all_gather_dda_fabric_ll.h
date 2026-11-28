@@ -44,14 +44,14 @@ template <typename T, int NRANKS_CT>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
 #endif
-  __global__ void ddaAllGatherFabricLL(T* const* __restrict__ peerScratch,    // ddaPeerPtrsDev: nRanks scratch bases
-                                       T* __restrict__ recvbuff,              // local user output
-                                       const T* __restrict__ sendbuff,        // local user input
+  __global__ void ddaAllGatherFabricLL(T* const* __restrict__ peerScratch,    // ddaLLRegion: nRanks LL region bases
+                                       T* recvbuff,                           // local user output; not __restrict__:
+                                       const T* sendbuff,                     // in place it is recvbuff's self slot
                                        size_t perRankBytes,                   // per-rank payload; multiple of 16
                                        int selfRank, int nRanksRt,
                                        uint32_t* __restrict__ epochDev,       // per-block LL epoch cells
                                        int epochLen,                          // number of cells in epochDev
-                                       size_t bankSize,                     // scratch bank size (from host)
+                                       size_t bankSize,                     // LL bank size (ddaLLRegion)
                                        DdaKernelParams params) {
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;

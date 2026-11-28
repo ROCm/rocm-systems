@@ -59,6 +59,17 @@ inline unsigned ddaIpcLLBlocks(const ncclComm* comm, size_t unitBytes, unsigned 
   return (unsigned)std::max<size_t>(std::min(need, budget), 1);
 }
 
+// Rows per peer column of a block-per-peer IPC LL launch (AllGather, AlltoAll) over unitBytes per peer, a thread per
+// packet: within wideBlocks shared by the nRanks columns, kDdaLLAgMaxBlocksPerPeer and the epoch cells (on IPC at
+// least kDdaNranks x kDdaLLAgMaxBlocksPerPeer, ddaLLEpochCount). At least one: every peer needs a column.
+inline unsigned ddaIpcLLPeerRows(const ncclComm* comm, size_t unitBytes, unsigned threads, uint32_t wideBlocks) {
+  const size_t cols = (size_t)std::max(comm->nRanks, 1);
+  const size_t cells = (size_t)std::max(comm->ddaLLEpochLen, 1);
+  const size_t wanted = ((unitBytes >> 3) + threads - 1) / threads;
+  const size_t rows = std::min({wanted, (size_t)wideBlocks / cols, (size_t)kDdaLLAgMaxBlocksPerPeer, cells / cols});
+  return (unsigned)std::max<size_t>(rows, 1);
+}
+
 } // namespace nccl_dda_detail
 
 #endif // DDA_LL_REGION_H_

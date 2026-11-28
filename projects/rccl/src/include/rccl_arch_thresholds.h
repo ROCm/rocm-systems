@@ -31,6 +31,14 @@ static constexpr size_t kThreshUnlimited = SIZE_MAX;
 // Warns once (via WARN) if minBytes > maxBytes with maxBytes != 0.
 bool rcclWindowFits(size_t totalBytes, size_t minBytes, size_t maxBytes);
 
+// Window of total message bytes [minBytes, maxBytes] where an IPC LL one-shot runs on up to `blocks` blocks
+// (block-per-peer kernels: blocks / nRanks per peer, at least one). 0 blocks = no window.
+struct rcclDdaIpcLLWide {
+  size_t minBytes;
+  size_t maxBytes;
+  uint32_t blocks;
+};
+
 struct rcclArchThresholds {
   // DDA tier upper bounds, per collective.  gfx1250 uses fabric LL/LL128/VMM;
   // gfx942/gfx950 use ddaVmmMax as the DDA-IPC cap (LL128 unused; LL: IPC LL one-shots).
@@ -226,6 +234,10 @@ struct rcclArchThresholds {
   // tuning model's per-rank ranges. gfx1250 DPX sets both; other tables leave them 0.
   size_t bcRingLLMaxBytes;
   size_t bcRingLL128MaxBytes;
+
+  // Single-node IPC DDA LL one-shots on a wider grid than the IPC kernel they replace, per collective
+  // (rcclDdaIpcLLWide). Env ceilings only lower a window.
+  rcclDdaIpcLLWide ddaIpcLLWide[RCCL_DDA_FUNC_COUNT];
 };
 
 // Compute-partition mode a gfx1250 comm is tuned for (RCCL_TUNING_PARTITION_MODE). It picks

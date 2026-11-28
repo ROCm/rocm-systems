@@ -3589,6 +3589,11 @@
           "test_filter": "RevokeDdaIpcMPITest.IncompleteCollective_DdaIpcAlltoAll"
         },
         {
+          "name": "IncompleteCollective_DdaIpcLLAllGather",
+          "description": "Rank 7 skips a 64 KiB DDA IPC LL one-shot AllGather so ranks 0-6 poll peer flags; asserts DDA LL via rcclGetCollImplInfo; revoke must unblock stream sync then shrink",
+          "test_filter": "RevokeDdaIpcMPITest.IncompleteCollective_DdaIpcLLAllGather"
+        },
+        {
           "name": "ShrinkAbort_DisablesDdaOnParent",
           "description": "NCCL_SHRINK_ABORT on an 8-rank DDA-IPC parent: the parent stops selecting DDA and the 7-rank child AllReduce succeeds",
           "test_filter": "RevokeDdaIpcMPITest.ShrinkAbort_DisablesDdaOnParent"
@@ -4085,6 +4090,11 @@
           "name": "DDA_IpcReduceScatterIndexData_8Ranks",
           "description": "DDA IPC ReduceScatter with rank- and index-dependent fp32/bf16 data: every rank must receive its own reduced slice",
           "test_filter": "DdaIpcMPI_IndexData.ReduceScatter*"
+        },
+        {
+          "name": "DDA_IpcWideLL_8Ranks",
+          "description": "DDA LL one-shots over IPC in the per-arch wide-grid windows: table edges, tier around both edges, fp32/bf16 data in and out of place, calls mixed with the other LL tiers and graph replays; skips where an arch has no window",
+          "test_filter": "DdaIpcMPI_WideLL.*"
         },
         {
           "name": "DDA_IpcCommLifecycle_8Ranks",
